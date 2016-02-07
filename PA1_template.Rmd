@@ -6,20 +6,178 @@ output:
 ---
 
 
+## Set Global Options
+
+```{r setoptions, echo=TRUE}
+#load libs
+library(knitr)
+library(dplyr)
+library(stringr)
+library(lattice)
+
+#set echo on
+opts_chunk$set(echo = TRUE)
+
+```
+
+
 ## Loading and preprocessing the data
 
 
+```{r loaddata}  
+#create dir if not exist
+if (!file.exists("datadir"))
+{
+  dir.create("datadir")
+}
+
+#unzip zip into datadir directory
+unzip("activity.zip",exdir="./datadir")
+
+#read csv
+dataset <- read.csv("./datadir/activity.csv", sep = ",", stringsAsFactors = FALSE, header= TRUE)
+
+#convert to date
+dataset$date <- as.Date(dataset$date,"%Y-%m-%d")
+```
 
 ## What is mean total number of steps taken per day?
+```{r sumsteps}
+#filter out NA's
+datasetMinusNA <- subset(dataset,!is.na(dataset$steps))
 
+#group by date and sum steps
+totalStepsPerDay <- summarise(group_by(datasetMinusNA,date),sum(steps))
+
+#plot histogram
+hist(totalStepsPerDay$`sum(steps)`,
+    main="Histogram of the total number of steps taken each day",xlab="Total Steps")
+```
+
+```{r meanAndmedian}
+#calculate mean and median
+totalStepsPerDayMean <- mean(totalStepsPerDay$`sum(steps)`)
+totalStepsPerDayMedian <- median(totalStepsPerDay$`sum(steps)`)
+```
+
+For the total number of steps taken per day the mean is `r totalStepsPerDayMean` and the median is `r totalStepsPerDayMedian` 
+
+````{r dumpDataMeanMedian, results="asis"}
+#group by date and create mean,median and sum's
+stepsPerDayMeanMedian <- summarise(group_by(datasetMinusNA,date),mean(steps),median(steps),sum(steps))
+
+#output raw data for review
+kable(stepsPerDayMeanMedian, format = "html")
+````
 
 
 ## What is the average daily activity pattern?
 
+```{r avgdaily}
+#Requirement:Make a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis)
 
+#Take the non-NA dataset
+#group by interval and take the average of steps
+averageStepsPerInterval <- summarise(group_by(datasetMinusNA,interval),mean(steps))
+
+#pad with zeros the interval then convert to time datatype before plotting
+with(averageStepsPerInterval,plot(strptime(str_pad(interval,4,side="left",pad="0"),"%H%M"),
+                                   `mean(steps)`,
+                                    type = "l",
+                                    main="Average daily activity pattern",
+                                    xlab="Hours",
+                                    ylab="Average number of steps"))
+```
+
+```{r calcMaxInterval}
+# find max steps
+# subset based on max steps and return column 1
+# format accordingly
+maxInterval <- format(strptime(str_pad(averageStepsPerInterval[which.max(averageStepsPerInterval$`mean(steps)`),1],4,side="left",pad="0"),"%H%M"),"%H:%M")
+
+```
+
+
+The `r maxInterval` 5-minute interval, on average across all the days in the dataset, contained the maximum number of steps.
 
 ## Imputing missing values
 
+```{r missingValues}
+totalMissingValues <- sum(is.na(dataset$steps))
+```
 
+Total number of missing values in the dataset (i.e. the total number of rows with NAs) = `r totalMissingValues`
+
+I'm using 'step mean' values for specific intervals across all days to populate missing values
+
+```{r fillInValues}
+#copy dataset
+datasetWithNAsFilledIn <- dataset
+
+#loop over dataframe rows
+for (i in 1:nrow(datasetWithNAsFilledIn) )
+{
+  #extract row
+  datasetRow <- datasetWithNAsFilledIn[i,]
+
+  #if NA then
+  if (is.na(datasetRow$steps))
+  {
+    #copy step (column 2) from the average dataframe where interval equals the interval of the current row
+    datasetWithNAsFilledIn[i,1] <- subset(averageStepsPerInterval,interval==datasetRow$interval,2)
+  }
+}
+
+#group by date and sum steps
+totalStepsPerDayFilledIN <- summarise(group_by(datasetWithNAsFilledIn,date),sum(steps))
+
+#plot histogram
+hist(totalStepsPerDayFilledIN$`sum(steps)`,
+    main="Histogram of the total number of steps taken each day for filled in NAs",xlab="Total Steps")
+
+```
+
+```{r meanAndmedianFilledIn}
+#calculate mean and median
+totalStepsPerDayMeanFilled <- mean(totalStepsPerDayFilledIN$`sum(steps)`)
+totalStepsPerDayMedianFilled <- median(totalStepsPerDayFilledIN$`sum(steps)`)
+```
+
+
+For the total number of steps taken per day the mean is `r totalStepsPerDayMeanFilled` and the median is `r totalStepsPerDayMedianFilled` 
+
+````{r dumpDataMeanMedianFilled, results="asis"}
+#output raw data for review
+stepsPerDayMeanMedianFilled <- summarise(group_by(datasetWithNAsFilledIn,date),mean(steps),median(steps),sum(steps))
+kable(stepsPerDayMeanMedianFilled, format = "html")
+````
+
+
+You can see by adding in missing values thatthe frequency of particular ranges has increased. However when you look at the RAW data the filled in values look like anomalies. 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r daysAndWeekends}
+#copy data with NA's filled in
+datasetWithFactors <- datasetWithNAsFilledIn
+
+#if weekday is Saturday OR Sunday then set new column to weekend else weekday
+datasetWithFactors$weektype <- ifelse(weekdays(datasetWithNAsFilledIn$date)=="Sunday" | weekdays(datasetWithNAsFilledIn$date)=="Saturday" , "weekend", "weekday")
+
+#set as factor datatype
+datasetWithFactors$weektype <- as.factor(datasetWithFactors$weektype)
+
+
+#Take the NA filled In dataset
+#group by interval and take the average of steps
+averageStepsPerIntervalFilled <- summarise(group_by(datasetWithFactors,weektype,interval),mean(steps))
+
+#pad with zeros the interval then convert to time datatype before plotting
+xyplot(`mean(steps)`~interval|weektype, data=averageStepsPerIntervalFilled, 
+                                    type="l",
+                                    main="Average daily activity pattern",
+                                    xlab="Hours",
+                                    ylab="Average number of steps",
+                                    layout=c(1,2))
+
+```
